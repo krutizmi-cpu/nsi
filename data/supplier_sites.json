@@ -1,0 +1,7 @@
+{
+  "description": "Сопоставление домена сайта поставщика и идентификатора парсера. Файл можно править без изменения кода.",
+  "default_parser": "generic",
+  "hosts": {
+    "example-supplier.ru": "generic"
+  }
+}
