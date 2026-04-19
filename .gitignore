@@ -1,8 +1,1 @@
-```
-# Python compiled files
-*.pyc
-__pycache__/
-
-# Database file
-data/nsi.db
-```
+Nothing should be ignored since only a Python source file (`services/bulk_upload.py`) was modified and no build artifacts, dependencies, or temporary files were detected in the changes.

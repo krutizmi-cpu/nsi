@@ -26,7 +26,7 @@ from io import BytesIO
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from models import BulkUploadTask, NsiGroup, NsiItem
@@ -360,7 +360,3 @@ def get_bulk_upload_stats(session: Session, batch_id: str | None = None) -> dict
             stats[status] = count
     
     return stats
-
-
-# Импортируем func для статистики
-from sqlalchemy import func
