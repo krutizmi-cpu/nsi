@@ -7,8 +7,13 @@ from sqlalchemy import func, select
 from config import DATA_DIR, NAME_MAX_LEN, TNVED_VAT_CONFIG_PATH, TNVED_VAT_LOOKUP_URL
 from db_session import SessionLocal, init_db
 from integrations.onec_client import get_default_onec_client
-from models import DuplicateCandidate, NsiGroup, NsiItem, OnecCatalogEntry
+from models import BulkUploadTask, DuplicateCandidate, NsiGroup, NsiItem, OnecCatalogEntry
 from services.barcode_flow import resolve_barcode
+from services.bulk_upload import (
+    get_bulk_upload_stats,
+    process_all_pending_tasks,
+    upload_excel_batch,
+)
 from services.dimensions_service import volume_m3_from_mm
 from services.duplicates import find_similar_items, record_duplicate_candidates
 from services.groups_onec import ensure_group_from_onec_path
@@ -37,7 +42,7 @@ if "_nsi_flash" in st.session_state:
 
 _bootstrap()
 
-tab_catalog, tab_new, tab_excel = st.tabs(["Каталог", "Новая позиция", "Справочник 1С (Excel)"])
+tab_catalog, tab_new, tab_excel, tab_bulk = st.tabs(["Каталог", "Новая позиция", "Справочник 1С (Excel)", "Массовая загрузка"])
 
 with tab_catalog:
     with SessionLocal() as session:
@@ -119,6 +124,87 @@ with tab_excel:
     with SessionLocal() as session:
         cnt = session.execute(select(func.count()).select_from(OnecCatalogEntry)).scalar_one()
     st.caption(f"Строк в справочнике 1С: **{cnt}**")
+
+with tab_bulk:
+    st.markdown("### Массовая загрузка новых позиций из Excel")
+    st.info(
+        "Загрузите Excel-файл с колонками:\n\n"
+        "- **supplier_article** (артикул поставщика) — обязательно\n"
+        "- **name** (наименование) — обязательно\n"
+        "- **supplier_name** (наименование поставщика) — обязательно\n"
+        "- **supplier_url** (ссылка на сайт поставщика) — обязательно\n"
+        "- **barcode** (штрихкод) — необязательно\n"
+        "- **length_mm, width_mm, height_mm, weight_kg** — необязательно\n\n"
+        "Система автоматически:\n"
+        "1. Спарсит данные с сайтов поставщиков (габариты, вес, ТН ВЭД)\n"
+        "2. Определит категорию по базе\n"
+        "3. Создаст позиции в НСИ"
+    )
+    
+    bulk_file = st.file_uploader("Файл Excel для массовой загрузки", type=["xlsx", "xls"], key="bulk_upload_file")
+    supplier_name_override = st.text_input(
+        "Наименование поставщика (переопределение)",
+        help="Если указано, будет использовано для всех строк вместо значения из файла",
+        key="bulk_supplier_name"
+    )
+    
+    if bulk_file is not None and st.button("Загрузить и создать задачи", type="primary"):
+        file_bytes = bulk_file.read()
+        with SessionLocal() as session:
+            count, error = upload_excel_batch(session, file_bytes, supplier_name_override or None)
+            if error:
+                st.error(error)
+            else:
+                session.commit()
+                st.session_state["_nsi_flash"] = f"Создано задач на обработку: {count}"
+                st.success(f"✅ Создано задач: {count}")
+                st.rerun()
+    
+    # Отображение статуса задач
+    with SessionLocal() as session:
+        stats = get_bulk_upload_stats(session)
+        
+    if stats["total"] > 0:
+        st.subheader("Статистика задач")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("В ожидании", stats["pending"])
+        with col2:
+            st.metric("В обработке", stats["processing"])
+        with col3:
+            st.metric("Успешно", stats["completed"])
+        with col4:
+            st.metric("С ошибками", stats["failed"])
+        
+        if st.button("Обработать все ожидающие задачи"):
+            with SessionLocal() as session:
+                success, total = process_all_pending_tasks(session)
+                st.session_state["_nsi_flash"] = f"Обработано: {success}/{total}"
+                st.rerun()
+        
+        # Таблица последних задач
+        st.subheader("Последние задачи")
+        with SessionLocal() as session:
+            recent_tasks = session.execute(
+                select(BulkUploadTask).order_by(BulkUploadTask.created_at.desc()).limit(50)
+            ).scalars().all()
+        
+        if recent_tasks:
+            task_data = []
+            for t in recent_tasks:
+                task_data.append({
+                    "ID": t.id,
+                    "Артикул": t.supplier_article,
+                    "Поставщик": t.supplier_name,
+                    "URL": t.supplier_url[:50] + "..." if len(t.supplier_url) > 50 else t.supplier_url,
+                    "Статус": t.status,
+                    "Группа": t.suggested_group_name or "-",
+                    "Ошибка": t.error_message[:50] if t.error_message else "-",
+                    "Создано": t.created_at.strftime("%Y-%m-%d %H:%M"),
+                })
+            st.dataframe(pd.DataFrame(task_data), use_container_width=True, hide_index=True)
+    else:
+        st.caption("Задач на массовую загрузку пока нет.")
 
 with tab_new:
     with SessionLocal() as session:
