@@ -102,3 +102,42 @@ class OnecCatalogEntry(Base):
     vat_rate_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
     import_batch: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class BulkUploadTask(Base):
+    """Задачи на массовую загрузку позиций из Excel с последующим парсингом."""
+
+    __tablename__ = "bulk_upload_tasks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    supplier_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    supplier_url: Mapped[str] = mapped_column(Text, nullable=False)
+    supplier_article: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    barcode: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    length_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    width_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    height_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    
+    # Результаты обработки
+    status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)  # pending, processing, completed, failed
+    parsed_length_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    parsed_width_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    parsed_height_mm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    parsed_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    parsed_tnved_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    parsed_barcode: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    suggested_group_id: Mapped[int | None] = mapped_column(ForeignKey("nsi_groups.id"), nullable=True)
+    suggested_group_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    parser_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    
+    # Ссылка на созданную позицию
+    created_item_id: Mapped[int | None] = mapped_column(ForeignKey("nsi_items.id"), nullable=True)
+    
+    batch_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    
+    created_item: Mapped[NsiItem | None] = relationship()
+    suggested_group: Mapped[NsiGroup | None] = relationship()
